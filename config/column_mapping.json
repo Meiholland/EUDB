@@ -69,6 +69,44 @@
     "Companies",
     "Portfolio",
     "Notable Investments"
+  ],
+  "exit_total_value": [
+    "Exit Total Value",
+    "Total Exit Value",
+    "Exit Value",
+    "Total Exits",
+    "Exit Amount"
+  ],
+  "website": [
+    "Website",
+    "URL",
+    "Web",
+    "Site",
+    "Homepage"
+  ],
+  "email": [
+    "Email",
+    "E-mail",
+    "Contact Email",
+    "Email Address"
+  ],
+  "phone": [
+    "Phone",
+    "Telephone",
+    "Contact Phone",
+    "Phone Number"
+  ],
+  "founded": [
+    "Founded",
+    "Year Founded",
+    "Foundation Year",
+    "Established"
+  ],
+  "employees": [
+    "Employees",
+    "Number of Employees",
+    "Team Size",
+    "Headcount"
   ]
 }
 

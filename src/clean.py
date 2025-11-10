@@ -246,6 +246,23 @@ def clean_dataframe(df: pd.DataFrame,
     if 'portfolio_value' in df.columns:
         df['portfolio_value'] = df['portfolio_value'].apply(parse_money)
     
+    # Parse exit total value
+    if 'exit_total_value' in df.columns:
+        df['exit_total_value'] = df['exit_total_value'].apply(parse_money)
+    
+    # Clean website, email, phone columns
+    for col in ['website', 'email', 'phone']:
+        if col in df.columns:
+            df[col] = df[col].apply(clean_string)
+    
+    # Parse founded year as text (keep as string to handle ranges like "2010-2015")
+    if 'founded' in df.columns:
+        df['founded'] = df['founded'].apply(clean_string)
+    
+    # Parse employees (keep as text to handle ranges)
+    if 'employees' in df.columns:
+        df['employees'] = df['employees'].apply(clean_string)
+    
     # Parse no_of_rounds as integer
     if 'no_of_rounds' in df.columns:
         df['no_of_rounds'] = pd.to_numeric(df['no_of_rounds'], errors='coerce').astype('Int64')
@@ -271,7 +288,8 @@ def clean_dataframe(df: pd.DataFrame,
     standard_columns = [
         'name', 'description', 'preferred_round', 'location', 'country',
         'deal_size_min', 'deal_size_max', 'no_of_rounds', 'portfolio_value',
-        'notable_companies', 'source_file', 'source_sheet', 'ingested_at'
+        'notable_companies', 'exit_total_value', 'website', 'email', 'phone',
+        'founded', 'employees', 'source_file', 'source_sheet', 'ingested_at'
     ]
     
     # Remove rows where name is missing (low quality)
@@ -284,12 +302,20 @@ def clean_dataframe(df: pd.DataFrame,
         df = pd.DataFrame(columns=standard_columns)
         return df
     
+    # Preserve any unmapped columns that aren't in standard_columns
+    # (but don't keep original unmapped column names - they'll be lost)
+    # First, ensure standard columns exist
     for col in standard_columns:
         if col not in df.columns:
             df[col] = None
     
-    # Reorder columns
-    df = df[standard_columns]
+    # Get all columns that exist in df but aren't standard
+    # Keep them as additional columns (with original names preserved)
+    additional_columns = [col for col in df.columns if col not in standard_columns]
+    
+    # Reorder: standard columns first, then additional columns
+    final_columns = standard_columns + additional_columns
+    df = df[[col for col in final_columns if col in df.columns]]
     
     final_rows = len(df)
     logger.info(f"Cleaned DataFrame: {original_rows} -> {final_rows} rows")

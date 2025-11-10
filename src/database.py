@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS investors (
     no_of_rounds INTEGER,
     portfolio_value REAL,
     notable_companies TEXT,
+    exit_total_value REAL,
+    website TEXT,
+    email TEXT,
+    phone TEXT,
+    founded TEXT,
+    employees TEXT,
     source_file TEXT,
     source_sheet TEXT,
     ingested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -41,9 +47,41 @@ INDEXES_SQL = [
 ]
 
 
+def migrate_database(conn: sqlite3.Connection) -> None:
+    """
+    Add new columns to existing database if they don't exist.
+    This allows schema evolution without losing data.
+    """
+    new_columns = {
+        'exit_total_value': 'REAL',
+        'website': 'TEXT',
+        'email': 'TEXT',
+        'phone': 'TEXT',
+        'founded': 'TEXT',
+        'employees': 'TEXT'
+    }
+    
+    cursor = conn.cursor()
+    # Get existing columns
+    cursor.execute("PRAGMA table_info(investors)")
+    existing_columns = [row[1] for row in cursor.fetchall()]
+    
+    # Add missing columns
+    for col_name, col_type in new_columns.items():
+        if col_name not in existing_columns:
+            try:
+                cursor.execute(f"ALTER TABLE investors ADD COLUMN {col_name} {col_type}")
+                logger.info(f"Added column {col_name} to database")
+            except sqlite3.OperationalError as e:
+                logger.warning(f"Could not add column {col_name}: {e}")
+    
+    conn.commit()
+
+
 def init_database(db_path: str = "data/investors.db") -> sqlite3.Connection:
     """
     Initialize the database with schema and indexes.
+    Also migrates existing databases to add new columns.
     
     Args:
         db_path: Path to SQLite database file
@@ -57,8 +95,19 @@ def init_database(db_path: str = "data/investors.db") -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys = ON")
     
-    # Create schema
-    conn.executescript(SCHEMA_SQL)
+    # Check if table exists
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='investors'")
+    table_exists = cursor.fetchone() is not None
+    
+    if not table_exists:
+        # Create schema for new database
+        conn.executescript(SCHEMA_SQL)
+        logger.info(f"Created new database at {db_path}")
+    else:
+        # Migrate existing database
+        migrate_database(conn)
+        logger.info(f"Migrated existing database at {db_path}")
     
     # Create indexes
     for index_sql in INDEXES_SQL:
