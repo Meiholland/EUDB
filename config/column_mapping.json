@@ -1,0 +1,74 @@
+{
+  "name": [
+    "Name",
+    "Investor Name",
+    "Fund",
+    "Company Name",
+    "Firm",
+    "Investor",
+    "VC Name"
+  ],
+  "location": [
+    "Location",
+    "HQ",
+    "City",
+    "Headquarters",
+    "Base",
+    "Head Office",
+    "Address"
+  ],
+  "country": [
+    "Country",
+    "Nation",
+    "Country Code"
+  ],
+  "description": [
+    "Description",
+    "About",
+    "Bio",
+    "Overview",
+    "Summary",
+    "Details"
+  ],
+  "preferred_round": [
+    "Preferred Round",
+    "Round Type",
+    "Stage",
+    "Investment Stage",
+    "Funding Stage",
+    "Round"
+  ],
+  "deal_size": [
+    "Deal Size Range",
+    "Check Size",
+    "Ticket Size",
+    "Investment Size",
+    "Deal Size",
+    "Investment Range",
+    "Check Size Range"
+  ],
+  "no_of_rounds": [
+    "No of Rounds",
+    "Number of Rounds",
+    "Rounds",
+    "Total Rounds",
+    "Round Count"
+  ],
+  "portfolio_value": [
+    "Portfolio Value",
+    "Total Portfolio",
+    "AUM",
+    "Assets Under Management",
+    "Fund Size",
+    "Total Assets"
+  ],
+  "notable_companies": [
+    "Notable Companies",
+    "Portfolio Companies",
+    "Investments",
+    "Companies",
+    "Portfolio",
+    "Notable Investments"
+  ]
+}
+
