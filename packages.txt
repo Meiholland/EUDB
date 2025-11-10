@@ -1,4 +1,0 @@
-# For Streamlit Cloud deployment
-# This file tells Streamlit Cloud which system packages to install
-# Leave empty if no system packages are needed
-
