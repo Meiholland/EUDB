@@ -69,12 +69,12 @@ with st.sidebar:
     st.markdown("---")
     
     # Refresh button
-    if st.button("🔄 Refresh Data", use_container_width=True):
+    if st.button("🔄 Refresh Data", width='stretch'):
         load_data()
         st.success("Data refreshed!")
     
     # Export schema
-    if st.button("📋 Export Schema", use_container_width=True):
+    if st.button("📋 Export Schema", width='stretch'):
         try:
             schema_path = export_schema("data/investors.db", "schema.sql")
             with open(schema_path, 'r') as f:
@@ -127,7 +127,7 @@ with tab1:
                 help="Similarity threshold for duplicate detection (higher = stricter)"
             )
         
-        if st.button("🚀 Clean & Merge", type="primary", use_container_width=True):
+        if st.button("🚀 Clean & Merge", type="primary", width='stretch'):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
@@ -294,7 +294,7 @@ with tab2:
             
             st.dataframe(
                 display_df,
-                use_container_width=True,
+                width='stretch',
                 height=600
             )
             
@@ -308,7 +308,7 @@ with tab2:
                     csv,
                     f"investors_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     "text/csv",
-                    use_container_width=True
+                    width='stretch'
                 )
             
             with col2:
@@ -318,7 +318,7 @@ with tab2:
                     json_str,
                     f"investors_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                     "application/json",
-                    use_container_width=True
+                    width='stretch'
                 )
             
             with col3:
@@ -343,7 +343,7 @@ with tab3:
         # Display all data
         st.dataframe(
             st.session_state.df,
-            use_container_width=True,
+            width='stretch',
             height=600
         )
         
@@ -356,7 +356,7 @@ with tab3:
                 csv_all,
                 "cleaned_investors.csv",
                 "text/csv",
-                use_container_width=True
+                width='stretch'
             )
         with col2:
             json_all = st.session_state.df.to_json(orient='records', indent=2)
@@ -365,7 +365,7 @@ with tab3:
                 json_all,
                 "cleaned_investors.json",
                 "application/json",
-                use_container_width=True
+                width='stretch'
             )
 
 # Tab 4: Settings

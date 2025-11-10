@@ -267,15 +267,22 @@ def clean_dataframe(df: pd.DataFrame,
     df['source_sheet'] = sheet_name if sheet_name else None
     df['ingested_at'] = pd.Timestamp.now()
     
-    # Remove rows where name is missing (low quality)
-    df = df.dropna(subset=['name'])
-    
-    # Ensure all standard columns exist
+    # Ensure all standard columns exist first
     standard_columns = [
         'name', 'description', 'preferred_round', 'location', 'country',
         'deal_size_min', 'deal_size_max', 'no_of_rounds', 'portfolio_value',
         'notable_companies', 'source_file', 'source_sheet', 'ingested_at'
     ]
+    
+    # Remove rows where name is missing (low quality)
+    # Check if 'name' column exists before trying to drop rows
+    if 'name' in df.columns:
+        df = df.dropna(subset=['name'])
+    else:
+        logger.warning(f"No 'name' column found after cleaning. Sheet may be empty or have no mappable columns.")
+        # Return empty dataframe with standard columns
+        df = pd.DataFrame(columns=standard_columns)
+        return df
     
     for col in standard_columns:
         if col not in df.columns:
