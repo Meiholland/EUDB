@@ -201,15 +201,16 @@ def clean_dataframe(df: pd.DataFrame,
                    column_mapping: Dict = None) -> pd.DataFrame:
     """
     Main cleaning function that standardizes a DataFrame.
+    Now preserves ALL columns - mapping is optional for standardization.
     
     Args:
         df: Input DataFrame
         sheet_name: Name of the sheet (for country extraction)
         source_file: Source filename (for metadata)
-        column_mapping: Column mapping dictionary
+        column_mapping: Column mapping dictionary (optional - for standardization)
         
     Returns:
-        Cleaned and standardized DataFrame
+        Cleaned DataFrame with ALL original columns preserved
     """
     if df.empty:
         logger.warning("Empty DataFrame provided for cleaning")
@@ -217,13 +218,20 @@ def clean_dataframe(df: pd.DataFrame,
     
     df = df.copy()
     original_rows = len(df)
+    original_columns = list(df.columns)  # Preserve original column list
     
-    # Load column mapping if not provided
+    # Load column mapping if not provided (optional - for standardization only)
     if column_mapping is None:
         column_mapping = load_column_mapping()
     
-    # Map columns to standard names
+    # Map columns to standard names (this is optional - unmapped columns are preserved)
     df = map_columns(df, column_mapping)
+    
+    # Log unmapped columns
+    mapped_cols = set(df.columns)
+    unmapped_cols = [col for col in original_columns if col not in mapped_cols]
+    if unmapped_cols:
+        logger.info(f"Preserving unmapped columns: {unmapped_cols}")
     
     # Clean string columns
     string_columns = ['name', 'location', 'description', 'preferred_round', 'notable_companies']
@@ -279,46 +287,35 @@ def clean_dataframe(df: pd.DataFrame,
     if 'country' in df.columns:
         df['country'] = df['country'].apply(clean_string)
     
-    # Add source metadata
+    # Add source metadata (always add these)
     df['source_file'] = source_file if source_file else None
     df['source_sheet'] = sheet_name if sheet_name else None
     df['ingested_at'] = pd.Timestamp.now()
-    
-    # Ensure all standard columns exist first
-    standard_columns = [
-        'name', 'description', 'preferred_round', 'location', 'country',
-        'deal_size_min', 'deal_size_max', 'no_of_rounds', 'portfolio_value',
-        'notable_companies', 'exit_total_value', 'website', 'email', 'phone',
-        'founded', 'employees', 'source_file', 'source_sheet', 'ingested_at'
-    ]
     
     # Remove rows where name is missing (low quality)
     # Check if 'name' column exists before trying to drop rows
     if 'name' in df.columns:
         df = df.dropna(subset=['name'])
     else:
-        logger.warning(f"No 'name' column found after cleaning. Sheet may be empty or have no mappable columns.")
-        # Return empty dataframe with standard columns
-        df = pd.DataFrame(columns=standard_columns)
-        return df
+        # Try to find a name-like column
+        name_candidates = [col for col in df.columns if 'name' in col.lower() or 'company' in col.lower() or 'firm' in col.lower()]
+        if name_candidates:
+            logger.warning(f"No 'name' column found, but found potential name columns: {name_candidates}")
+            # Don't drop rows - keep them and let user decide
+        else:
+            logger.warning(f"No 'name' column found. Keeping all rows but data may be incomplete.")
     
-    # Preserve any unmapped columns that aren't in standard_columns
-    # (but don't keep original unmapped column names - they'll be lost)
-    # First, ensure standard columns exist
-    for col in standard_columns:
-        if col not in df.columns:
-            df[col] = None
+    # Clean ALL string columns (not just predefined ones)
+    for col in df.columns:
+        if df[col].dtype == 'object':  # String columns
+            # Skip if it's already been cleaned or is a special column
+            if col not in ['deal_size_min', 'deal_size_max', 'portfolio_value', 'exit_total_value', 'no_of_rounds']:
+                df[col] = df[col].apply(clean_string)
     
-    # Get all columns that exist in df but aren't standard
-    # Keep them as additional columns (with original names preserved)
-    additional_columns = [col for col in df.columns if col not in standard_columns]
-    
-    # Reorder: standard columns first, then additional columns
-    final_columns = standard_columns + additional_columns
-    df = df[[col for col in final_columns if col in df.columns]]
-    
+    # PRESERVE ALL COLUMNS - don't filter to a standard list
+    # The database will dynamically add any new columns it encounters
     final_rows = len(df)
-    logger.info(f"Cleaned DataFrame: {original_rows} -> {final_rows} rows")
+    logger.info(f"Cleaned DataFrame: {original_rows} -> {final_rows} rows, {len(df.columns)} columns preserved")
     
     return df
 

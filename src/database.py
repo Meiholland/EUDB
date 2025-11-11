@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Optional, List
 from loguru import logger
 from datetime import datetime
+try:
+    from .dynamic_schema import scan_and_update_schema, normalize_column_name
+except ImportError:
+    # Handle case where running as script
+    from dynamic_schema import scan_and_update_schema, normalize_column_name
 
 
 # SQLite schema (Supabase-ready)
@@ -123,6 +128,7 @@ def insert_dataframe(conn: sqlite3.Connection, df: pd.DataFrame,
                     replace: bool = False) -> int:
     """
     Insert DataFrame into the investors table.
+    Automatically detects and adds new columns to the schema.
     
     Args:
         conn: Database connection
@@ -136,8 +142,22 @@ def insert_dataframe(conn: sqlite3.Connection, df: pd.DataFrame,
         logger.warning("Empty DataFrame provided for insertion")
         return 0
     
+    # First, scan the DataFrame and update schema if needed
+    scan_and_update_schema(conn, df)
+    
     # Prepare DataFrame for insertion
     insert_df = df.copy()
+    
+    # Normalize all column names to match database schema
+    column_mapping = {}
+    for col in insert_df.columns:
+        normalized = normalize_column_name(col)
+        if normalized != col:
+            column_mapping[col] = normalized
+    
+    if column_mapping:
+        insert_df = insert_df.rename(columns=column_mapping)
+        logger.debug(f"Normalized columns: {column_mapping}")
     
     # Convert to SQL-compatible types
     for col in ['deal_size_min', 'deal_size_max', 'portfolio_value']:
