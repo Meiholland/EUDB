@@ -6,7 +6,7 @@ Creates and manages the investors database (Supabase-ready schema)
 import sqlite3
 import pandas as pd
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 from loguru import logger
 from datetime import datetime
 try:
@@ -69,7 +69,7 @@ def migrate_database(conn: sqlite3.Connection) -> None:
     cursor = conn.cursor()
     # Get existing columns
     cursor.execute("PRAGMA table_info(investors)")
-    existing_columns = [row[1] for row in cursor.fetchall()]
+    existing_columns = {row[1].lower() for row in cursor.fetchall()}
     
     # Add missing columns
     for col_name, col_type in new_columns.items():
@@ -81,6 +81,153 @@ def migrate_database(conn: sqlite3.Connection) -> None:
                 logger.warning(f"Could not add column {col_name}: {e}")
     
     conn.commit()
+
+
+def get_column_usage_stats(conn: sqlite3.Connection) -> Dict[str, Dict]:
+    """
+    Get statistics about column usage (how many non-null values each column has).
+    
+    Args:
+        conn: Database connection
+        
+    Returns:
+        Dictionary mapping column names to usage statistics
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(investors)")
+    columns = [row[1] for row in cursor.fetchall()]
+    
+    stats = {}
+    total_rows = cursor.execute("SELECT COUNT(*) FROM investors").fetchone()[0]
+    
+    for col in columns:
+        if col == 'id':
+            continue
+        # Count non-null values
+        cursor.execute(f"SELECT COUNT(*) FROM investors WHERE {col} IS NOT NULL AND {col} != ''")
+        non_null_count = cursor.fetchone()[0]
+        usage_percent = (non_null_count / total_rows * 100) if total_rows > 0 else 0
+        
+        stats[col] = {
+            'non_null_count': non_null_count,
+            'total_rows': total_rows,
+            'usage_percent': usage_percent,
+            'is_used': non_null_count > 0
+        }
+    
+    return stats
+
+
+def get_unused_columns(conn: sqlite3.Connection, min_usage_percent: float = 0.0) -> List[str]:
+    """
+    Get list of columns that are unused (all NULL or below usage threshold).
+    
+    Args:
+        conn: Database connection
+        min_usage_percent: Minimum usage percentage to consider a column "used" (0-100)
+        
+    Returns:
+        List of unused column names
+    """
+    stats = get_column_usage_stats(conn)
+    unused = []
+    
+    for col, stat in stats.items():
+        if stat['usage_percent'] <= min_usage_percent:
+            unused.append(col)
+    
+    return unused
+
+
+def remove_unused_columns(conn: sqlite3.Connection, columns_to_remove: List[str], 
+                         preserve_essential: bool = True) -> int:
+    """
+    Remove unused columns from the database.
+    Note: SQLite doesn't support DROP COLUMN directly, so we need to recreate the table.
+    
+    Args:
+        conn: Database connection
+        columns_to_remove: List of column names to remove
+        preserve_essential: If True, never remove essential columns (name, location, etc.)
+        
+    Returns:
+        Number of columns removed
+    """
+    if not columns_to_remove:
+        return 0
+    
+    essential_columns = {'id', 'name', 'location', 'source_file', 'source_sheet', 'ingested_at'}
+    
+    # Filter out essential columns if preserve_essential is True
+    if preserve_essential:
+        columns_to_remove = [col for col in columns_to_remove if col not in essential_columns]
+    
+    if not columns_to_remove:
+        logger.info("No removable columns (all are essential)")
+        return 0
+    
+    cursor = conn.cursor()
+    
+    # Get all current columns
+    cursor.execute("PRAGMA table_info(investors)")
+    all_columns = [row[1] for row in cursor.fetchall()]
+    
+    # Get columns to keep
+    columns_to_keep = [col for col in all_columns if col not in columns_to_remove]
+    
+    if len(columns_to_keep) == len(all_columns):
+        logger.info("No columns to remove")
+        return 0
+    
+    logger.info(f"Removing {len(columns_to_remove)} unused columns: {columns_to_remove}")
+    
+    # SQLite doesn't support DROP COLUMN, so we need to recreate the table
+    # This is a complex operation - we'll create a new table, copy data, then replace
+    
+    # Step 1: Create new table with only columns we want to keep
+    columns_def = []
+    for col in columns_to_keep:
+        if col == 'id':
+            columns_def.append(f"{col} INTEGER PRIMARY KEY AUTOINCREMENT")
+        elif col == 'name':
+            columns_def.append(f"{col} TEXT NOT NULL")
+        elif col in ['deal_size_min', 'deal_size_max', 'portfolio_value', 'exit_total_value']:
+            columns_def.append(f"{col} REAL")
+        elif col == 'no_of_rounds':
+            columns_def.append(f"{col} INTEGER")
+        elif col == 'ingested_at':
+            columns_def.append(f"{col} DATETIME DEFAULT CURRENT_TIMESTAMP")
+        else:
+            columns_def.append(f"{col} TEXT")
+    
+    # Create new table
+    new_table_sql = f"""
+    CREATE TABLE investors_new (
+        {', '.join(columns_def)}
+    )
+    """
+    
+    cursor.execute(new_table_sql)
+    
+    # Step 2: Copy data (only columns that exist in both)
+    columns_str = ', '.join(columns_to_keep)
+    cursor.execute(f"INSERT INTO investors_new ({columns_str}) SELECT {columns_str} FROM investors")
+    
+    # Step 3: Drop old table and rename new one
+    cursor.execute("DROP TABLE investors")
+    cursor.execute("ALTER TABLE investors_new RENAME TO investors")
+    
+    # Step 4: Recreate indexes
+    for index_sql in INDEXES_SQL:
+        try:
+            cursor.execute(index_sql)
+        except:
+            pass
+    
+    conn.commit()
+    logger.info(f"Successfully removed {len(columns_to_remove)} columns")
+    
+    return len(columns_to_remove)
 
 
 def init_database(db_path: str = "data/investors.db") -> sqlite3.Connection:
@@ -235,7 +382,7 @@ def insert_dataframe(conn: sqlite3.Connection, df: pd.DataFrame,
                         values.append(None)
                     elif isinstance(val, pd.Timestamp):
                         values.append(val.strftime('%Y-%m-%d %H:%M:%S'))
-                    elif isinstance(val, (pd._libs.tslibs.nattype.NaTType, type(pd.NaT))):
+                    elif hasattr(pd, 'NaT') and (val is pd.NaT or isinstance(val, type(pd.NaT))):
                         values.append(None)
                     else:
                         values.append(val)
@@ -376,6 +523,9 @@ def get_statistics(db_path: str = "data/investors.db") -> dict:
     cursor = conn.execute("SELECT DISTINCT source_file FROM investors WHERE source_file IS NOT NULL ORDER BY source_file")
     stats["sources"] = [row[0] for row in cursor.fetchall()]
     
+    # Column usage stats
+    stats["column_usage"] = get_column_usage_stats(conn)
+    
     conn.close()
     
     return stats
@@ -406,4 +556,3 @@ def export_schema(db_path: str = "data/investors.db",
     
     logger.info(f"Schema exported to {output_path}")
     return str(output_path)
-

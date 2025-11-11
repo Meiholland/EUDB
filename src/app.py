@@ -20,7 +20,8 @@ from ingest import load_file, filter_sheets, get_file_info
 from clean import clean_dataframe, load_column_mapping
 from database import (
     init_database, load_all_investors, search_investors,
-    get_statistics, export_schema
+    get_statistics, export_schema, get_column_usage_stats,
+    get_unused_columns, remove_unused_columns
 )
 from merge import ingest_and_merge
 
@@ -399,10 +400,60 @@ with tab4:
     
     st.markdown("---")
     
+    st.subheader("Column Usage & Cleanup")
+    st.markdown("View which columns are being used and remove unused columns.")
+    
+    try:
+        conn = init_database("data/investors.db")
+        column_stats = get_column_usage_stats(conn)
+        unused_cols = get_unused_columns(conn, min_usage_percent=0.0)
+        
+        if column_stats:
+            # Show column usage table
+            usage_data = []
+            for col, stats in sorted(column_stats.items()):
+                usage_data.append({
+                    "Column": col,
+                    "Used": f"{stats['non_null_count']:,}",
+                    "Total": f"{stats['total_rows']:,}",
+                    "Usage %": f"{stats['usage_percent']:.1f}%",
+                    "Status": "✅ Used" if stats['is_used'] else "❌ Unused"
+                })
+            
+            usage_df = pd.DataFrame(usage_data)
+            st.dataframe(usage_df, use_container_width=True, height=400)
+            
+            # Show unused columns
+            if unused_cols:
+                st.warning(f"⚠️ Found {len(unused_cols)} unused column(s): {', '.join(unused_cols)}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🗑️ Remove Unused Columns", type="primary"):
+                        try:
+                            removed = remove_unused_columns(conn, unused_cols, preserve_essential=True)
+                            st.success(f"✅ Removed {removed} unused column(s)!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error removing columns: {str(e)}")
+                
+                with col2:
+                    st.caption("This will permanently remove columns with no data. Essential columns (name, location, etc.) are protected.")
+            else:
+                st.success("✅ All columns are being used!")
+        
+        conn.close()
+    except Exception as e:
+        st.error(f"Error loading column stats: {str(e)}")
+    
+    st.markdown("---")
+    
     st.subheader("Database Info")
     try:
         stats = get_statistics("data/investors.db")
-        st.json(stats)
+        # Remove column_usage from main stats display (shown above)
+        display_stats = {k: v for k, v in stats.items() if k != 'column_usage'}
+        st.json(display_stats)
     except Exception as e:
         st.error(f"Error loading statistics: {str(e)}")
     
