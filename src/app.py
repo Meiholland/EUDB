@@ -421,7 +421,7 @@ with tab4:
                 })
             
             usage_df = pd.DataFrame(usage_data)
-            st.dataframe(usage_df, use_container_width=True, height=400)
+            st.dataframe(usage_df, width='stretch', height=400)
             
             # Show unused columns
             if unused_cols:
