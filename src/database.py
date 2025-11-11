@@ -54,33 +54,14 @@ INDEXES_SQL = [
 
 def migrate_database(conn: sqlite3.Connection) -> None:
     """
-    Add new columns to existing database if they don't exist.
-    This allows schema evolution without losing data.
+    Legacy migration function - now handled by dynamic_schema.
+    This function is kept for backward compatibility but does nothing.
+    The dynamic schema system (scan_and_update_schema) handles adding columns
+    automatically when data is inserted.
     """
-    new_columns = {
-        'exit_total_value': 'REAL',
-        'website': 'TEXT',
-        'email': 'TEXT',
-        'phone': 'TEXT',
-        'founded': 'TEXT',
-        'employees': 'TEXT'
-    }
-    
-    cursor = conn.cursor()
-    # Get existing columns
-    cursor.execute("PRAGMA table_info(investors)")
-    existing_columns = {row[1].lower() for row in cursor.fetchall()}
-    
-    # Add missing columns
-    for col_name, col_type in new_columns.items():
-        if col_name not in existing_columns:
-            try:
-                cursor.execute(f"ALTER TABLE investors ADD COLUMN {col_name} {col_type}")
-                logger.info(f"Added column {col_name} to database")
-            except sqlite3.OperationalError as e:
-                logger.warning(f"Could not add column {col_name}: {e}")
-    
-    conn.commit()
+    # Migration is now handled dynamically by scan_and_update_schema()
+    # when data is inserted. No hardcoded columns to add.
+    pass
 
 
 def get_column_usage_stats(conn: sqlite3.Connection) -> Dict[str, Dict]:
@@ -257,9 +238,9 @@ def init_database(db_path: str = "data/investors.db") -> sqlite3.Connection:
         conn.executescript(SCHEMA_SQL)
         logger.info(f"Created new database at {db_path}")
     else:
-        # Migrate existing database
-        migrate_database(conn)
-        logger.info(f"Migrated existing database at {db_path}")
+        # Database exists - dynamic schema will handle adding columns as needed
+        # No need to run migration (columns are added when data is inserted)
+        logger.debug(f"Database exists at {db_path}, using dynamic schema")
     
     # Create indexes
     for index_sql in INDEXES_SQL:
