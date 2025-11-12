@@ -620,37 +620,87 @@ with tab4:
     st.markdown("---")
     
     st.subheader("Export Database")
-    st.markdown("Export the SQLite database for Supabase import.")
+    st.markdown("Export the SQLite database for backup or local sync.")
     
-    if st.button("📤 Export SQL Dump"):
-        try:
-            import subprocess
-            db_path = "data/investors.db"
-            dump_path = "investors_dump.sql"
-            
-            result = subprocess.run(
-                ["sqlite3", db_path, ".dump"],
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode == 0:
-                with open(dump_path, "w") as f:
-                    f.write(result.stdout)
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Download actual database file
+        db_path = "data/investors.db"
+        if Path(db_path).exists():
+            with open(db_path, "rb") as f:
+                db_bytes = f.read()
+                st.download_button(
+                    "📥 Download Database (.db)",
+                    db_bytes,
+                    f"investors_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
+                    "application/x-sqlite3",
+                    help="Download the complete database file to sync with local development"
+                )
+        else:
+            st.info("Database file not found")
+    
+    with col2:
+        # Export SQL dump
+        if st.button("📤 Export SQL Dump"):
+            try:
+                import subprocess
+                dump_path = "investors_dump.sql"
                 
-                with open(dump_path, "r") as f:
-                    st.download_button(
-                        "📥 Download SQL Dump",
-                        f.read(),
-                        "investors_dump.sql",
-                        "text/plain"
-                    )
-                st.success("SQL dump created!")
-            else:
-                st.error(f"Error creating dump: {result.stderr}")
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
-            st.info("Make sure sqlite3 is installed and available in PATH")
+                result = subprocess.run(
+                    ["sqlite3", db_path, ".dump"],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    with open(dump_path, "w") as f:
+                        f.write(result.stdout)
+                    
+                    with open(dump_path, "r") as f:
+                        st.download_button(
+                            "📥 Download SQL Dump",
+                            f.read(),
+                            "investors_dump.sql",
+                            "text/plain"
+                        )
+                    st.success("SQL dump created!")
+                else:
+                    st.error(f"Error creating dump: {result.stderr}")
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+                st.info("Make sure sqlite3 is installed and available in PATH")
+    
+    st.markdown("---")
+    st.subheader("Import Database")
+    st.markdown("Replace the current database with an uploaded one (from local or colleagues).")
+    
+    uploaded_db = st.file_uploader(
+        "Upload Database File",
+        type=['db', 'sqlite', 'sqlite3'],
+        help="Upload a database file to replace the current one"
+    )
+    
+    if uploaded_db:
+        if st.button("⚠️ Replace Database", type="primary"):
+            try:
+                # Backup current database
+                backup_path = f"data/investors_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                if Path(db_path).exists():
+                    import shutil
+                    shutil.copy2(db_path, backup_path)
+                    st.info(f"Backup created: {backup_path}")
+                
+                # Save uploaded database
+                Path("data").mkdir(parents=True, exist_ok=True)
+                with open(db_path, "wb") as f:
+                    f.write(uploaded_db.getbuffer())
+                
+                st.success("✅ Database replaced! Refreshing data...")
+                load_data()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error replacing database: {str(e)}")
 
 # Initialize on first load
 if not st.session_state.data_loaded:
