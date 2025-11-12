@@ -21,7 +21,7 @@ from clean import clean_dataframe, load_column_mapping
 from database import (
     init_database, load_all_investors, search_investors,
     get_statistics, export_schema, get_column_usage_stats,
-    get_unused_columns, remove_unused_columns
+    get_unused_columns, remove_unused_columns, update_investor_from_dataframe
 )
 from merge import ingest_and_merge
 
@@ -38,6 +38,10 @@ if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
 if 'df' not in st.session_state:
     st.session_state.df = pd.DataFrame()
+if 'original_filtered_df' not in st.session_state:
+    st.session_state.original_filtered_df = pd.DataFrame()
+if 'last_saved_df' not in st.session_state:
+    st.session_state.last_saved_df = pd.DataFrame()
 
 
 def load_data():
@@ -276,34 +280,87 @@ with tab2:
         st.metric("Results", len(filtered_df))
         
         if not filtered_df.empty:
-            # Format display columns
-            display_df = filtered_df.copy()
+            # Store original for comparison (only if it's a new filter)
+            filter_key = f"{search_text}_{country_filter}_{location_filter}_{min_deal_size}_{max_deal_size}"
+            if 'current_filter_key' not in st.session_state or st.session_state.current_filter_key != filter_key:
+                st.session_state.original_filtered_df = filtered_df.copy()
+                st.session_state.last_saved_df = filtered_df.copy()
+                st.session_state.current_filter_key = filter_key
             
-            # Format money columns
-            if 'deal_size_min' in display_df.columns:
-                display_df['deal_size_min'] = display_df['deal_size_min'].apply(
-                    lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else ""
-                )
-            if 'deal_size_max' in display_df.columns:
-                display_df['deal_size_max'] = display_df['deal_size_max'].apply(
-                    lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else ""
-                )
-            if 'portfolio_value' in display_df.columns:
-                display_df['portfolio_value'] = display_df['portfolio_value'].apply(
-                    lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else ""
-                )
+            # Prepare editable dataframe (keep original numeric values for editing)
+            editable_df = filtered_df.copy()
             
-            st.dataframe(
-                display_df,
+            # Use data_editor for inline editing
+            st.info("💡 **Tip**: Double-click any cell to edit. Changes are saved automatically when you press Enter or click outside the cell.")
+            
+            edited_df = st.data_editor(
+                editable_df,
+                key=f"investor_editor_{filter_key}",
                 width='stretch',
-                height=600
+                height=600,
+                num_rows="fixed",
+                disabled=["id"],  # Don't allow editing the ID
+                hide_index=True
             )
             
-            # Export options
+            # Check if data was modified by comparing with last saved version
+            # Reset index for proper comparison
+            edited_comparison = edited_df.reset_index(drop=True)
+            saved_comparison = st.session_state.last_saved_df.reset_index(drop=True)
+            
+            # Compare dataframes (handles NaN properly)
+            if not edited_comparison.equals(saved_comparison):
+                # Find changed rows by comparing each row
+                if 'id' in edited_comparison.columns and 'id' in saved_comparison.columns:
+                    changed_rows = []
+                    for idx in range(min(len(edited_comparison), len(saved_comparison))):
+                        row_edited = edited_comparison.iloc[idx]
+                        row_original = saved_comparison.iloc[idx]
+                        
+                        # Compare values, handling NaN properly
+                        values_changed = False
+                        for col in edited_comparison.columns:
+                            if col == 'id':
+                                continue
+                            val_edited = row_edited[col]
+                            val_original = row_original[col]
+                            
+                            # Handle NaN comparison
+                            if pd.isna(val_edited) and pd.isna(val_original):
+                                continue
+                            elif pd.isna(val_edited) or pd.isna(val_original):
+                                values_changed = True
+                                break
+                            elif val_edited != val_original:
+                                values_changed = True
+                                break
+                        
+                        if values_changed:
+                            changed_rows.append(edited_comparison.iloc[[idx]])
+                    
+                    if changed_rows:
+                        # Save changes to database
+                        try:
+                            conn = init_database("data/investors.db")
+                            changes_df = pd.concat(changed_rows, ignore_index=True)
+                            updated_count = update_investor_from_dataframe(conn, changes_df)
+                            conn.close()
+                            
+                            if updated_count > 0:
+                                st.success(f"✅ Saved {updated_count} change(s) to database!")
+                                # Update the saved dataframe
+                                st.session_state.last_saved_df = edited_df.copy()
+                                # Reload data to reflect changes
+                                load_data()
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Error saving changes: {str(e)}")
+            
+            # Export options (use edited dataframe)
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                csv = filtered_df.to_csv(index=False)
+                csv = edited_df.to_csv(index=False)
                 st.download_button(
                     "📥 Download CSV",
                     csv,
@@ -313,7 +370,7 @@ with tab2:
                 )
             
             with col2:
-                json_str = filtered_df.to_json(orient='records', indent=2)
+                json_str = edited_df.to_json(orient='records', indent=2)
                 st.download_button(
                     "📥 Download JSON",
                     json_str,
@@ -341,17 +398,86 @@ with tab3:
     else:
         st.metric("Total Investors", len(st.session_state.df))
         
-        # Display all data
-        st.dataframe(
-            st.session_state.df,
+        # Initialize saved dataframe for "View All Data" tab
+        if 'original_all_df' not in st.session_state:
+            st.session_state.original_all_df = st.session_state.df.copy()
+            st.session_state.last_saved_all_df = st.session_state.df.copy()
+        
+        # Update if the underlying data changed
+        if not st.session_state.df.equals(st.session_state.original_all_df):
+            st.session_state.original_all_df = st.session_state.df.copy()
+            st.session_state.last_saved_all_df = st.session_state.df.copy()
+        
+        st.info("💡 **Tip**: Double-click any cell to edit. Changes are saved automatically when you press Enter or click outside the cell.")
+        
+        # Use data_editor for inline editing
+        edited_all_df = st.data_editor(
+            st.session_state.df.copy(),
+            key="investor_editor_all",
             width='stretch',
-            height=600
+            height=600,
+            num_rows="fixed",
+            disabled=["id"],  # Don't allow editing the ID
+            hide_index=True
         )
         
-        # Export all
+        # Check if data was modified by comparing with last saved version
+        # Reset index for proper comparison
+        edited_all_comparison = edited_all_df.reset_index(drop=True)
+        saved_all_comparison = st.session_state.last_saved_all_df.reset_index(drop=True)
+        
+        # Compare dataframes (handles NaN properly)
+        if not edited_all_comparison.equals(saved_all_comparison):
+            # Find changed rows by comparing each row
+            if 'id' in edited_all_comparison.columns and 'id' in saved_all_comparison.columns:
+                changed_rows = []
+                for idx in range(min(len(edited_all_comparison), len(saved_all_comparison))):
+                    row_edited = edited_all_comparison.iloc[idx]
+                    row_original = saved_all_comparison.iloc[idx]
+                    
+                    # Compare values, handling NaN properly
+                    values_changed = False
+                    for col in edited_all_comparison.columns:
+                        if col == 'id':
+                            continue
+                        val_edited = row_edited[col]
+                        val_original = row_original[col]
+                        
+                        # Handle NaN comparison
+                        if pd.isna(val_edited) and pd.isna(val_original):
+                            continue
+                        elif pd.isna(val_edited) or pd.isna(val_original):
+                            values_changed = True
+                            break
+                        elif val_edited != val_original:
+                            values_changed = True
+                            break
+                    
+                    if values_changed:
+                        changed_rows.append(edited_all_comparison.iloc[[idx]])
+                
+                if changed_rows:
+                    # Save changes to database
+                    try:
+                        conn = init_database("data/investors.db")
+                        changes_df = pd.concat(changed_rows, ignore_index=True)
+                        updated_count = update_investor_from_dataframe(conn, changes_df)
+                        conn.close()
+                        
+                        if updated_count > 0:
+                            st.success(f"✅ Saved {updated_count} change(s) to database!")
+                            # Update the saved dataframe
+                            st.session_state.last_saved_all_df = edited_all_df.copy()
+                            # Reload data to reflect changes
+                            load_data()
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Error saving changes: {str(e)}")
+        
+        # Export all (use edited dataframe)
         col1, col2 = st.columns(2)
         with col1:
-            csv_all = st.session_state.df.to_csv(index=False)
+            csv_all = edited_all_df.to_csv(index=False)
             st.download_button(
                 "📥 Download All (CSV)",
                 csv_all,
@@ -360,7 +486,7 @@ with tab3:
                 width='stretch'
             )
         with col2:
-            json_all = st.session_state.df.to_json(orient='records', indent=2)
+            json_all = edited_all_df.to_json(orient='records', indent=2)
             st.download_button(
                 "📥 Download All (JSON)",
                 json_all,
@@ -397,6 +523,40 @@ with tab4:
                 st.error(f"Error saving: {str(e)}")
     except Exception as e:
         st.error(f"Error loading column mapping: {str(e)}")
+    
+    st.markdown("---")
+    
+    st.subheader("🔍 Research & Update Investors")
+    st.markdown("Automatically research and update investor descriptions and websites.")
+    
+    research_col1, research_col2 = st.columns(2)
+    with research_col1:
+        research_country = st.selectbox(
+            "Select Country",
+            options=sorted(st.session_state.df['country'].dropna().unique()) if not st.session_state.df.empty and 'country' in st.session_state.df.columns else [],
+            help="Select a country to research investors from"
+        )
+    with research_col2:
+        research_limit = st.number_input(
+            "Limit (optional)",
+            min_value=1,
+            max_value=100,
+            value=10,
+            help="Maximum number of investors to research"
+        )
+    
+    if st.button("🔍 Research Investors", type="primary"):
+        st.info("⚠️ **Note**: Web research requires API access. This feature needs to be run with web search capabilities enabled.")
+        st.warning("For now, please use the research script manually or integrate with a web search API.")
+        
+        # Placeholder for future implementation
+        # This would call the research function when web search is available
+        st.code(f"""
+# To research investors, run:
+# python3 research_investors.py --country {research_country} --limit {research_limit}
+
+# Or integrate with web search API in the research.py module
+        """)
     
     st.markdown("---")
     

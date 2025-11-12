@@ -512,6 +512,63 @@ def get_statistics(db_path: str = "data/investors.db") -> dict:
     return stats
 
 
+def update_investor_from_dataframe(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
+    """
+    Update investor records from a DataFrame.
+    The DataFrame must have an 'id' column to identify which records to update.
+    Only non-null values in the DataFrame will be updated.
+    
+    Args:
+        conn: Database connection
+        df: DataFrame with updated investor data (must include 'id' column)
+        
+    Returns:
+        Number of records updated
+    """
+    if df.empty or 'id' not in df.columns:
+        return 0
+    
+    cursor = conn.cursor()
+    updated_count = 0
+    
+    # Get all column names from the database
+    cursor.execute("PRAGMA table_info(investors)")
+    db_columns = {row[1] for row in cursor.fetchall()}
+    
+    for _, row in df.iterrows():
+        investor_id = row['id']
+        if pd.isna(investor_id):
+            continue
+        
+        updates = []
+        params = []
+        
+        # Update all non-null, non-id columns that exist in the database
+        for col in df.columns:
+            if col == 'id' or col not in db_columns:
+                continue
+            
+            value = row[col]
+            # Only update if value is not null/NaN
+            if pd.notna(value):
+                updates.append(f"{col} = ?")
+                params.append(value)
+        
+        if updates:
+            params.append(investor_id)
+            sql = f"UPDATE investors SET {', '.join(updates)} WHERE id = ?"
+            try:
+                cursor.execute(sql, params)
+                if cursor.rowcount > 0:
+                    updated_count += 1
+            except Exception as e:
+                logger.error(f"Error updating investor {investor_id}, column updates: {updates}: {e}")
+    
+    conn.commit()
+    logger.info(f"Updated {updated_count} investor records from DataFrame")
+    return updated_count
+
+
 def export_schema(db_path: str = "data/investors.db", 
                  output_path: str = "schema.sql") -> str:
     """
